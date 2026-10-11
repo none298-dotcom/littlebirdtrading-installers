@@ -65,7 +65,7 @@ jobs:
             [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
             $bmp.Save("shots/$tab.png"); Stop-Process -Id $app.Id -Force; Start-Sleep 2
           }
-          Get-ChildItem dist -Recurse | ForEach-Object { "{0} {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Tee-Object dist/SHA256SUMS.txt
+          Get-ChildItem dist -Recurse -File | ForEach-Object { "{0} {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Tee-Object dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
