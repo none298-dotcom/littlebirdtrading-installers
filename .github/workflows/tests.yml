@@ -1,0 +1,46 @@
+name: Tests (Linux and Windows)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch or commit of littlebirdtrading-app
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out the private source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: none298-dotcom/littlebirdtrading-app
+          ref: ${{ inputs.source_ref || 'main' }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - name: Record the commit
+        shell: bash
+        run: echo "testing $(git rev-parse HEAD) $(git log -1 --pretty=%s)"
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Shared rules and desktop app tests
+        shell: bash
+        working-directory: android
+        run: ./gradlew --no-daemon :core:test :desktop:test
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: shots-${{ matrix.os }}
+          path: |
+            android/desktop/build/shots/
+            android/*/build/reports/tests/

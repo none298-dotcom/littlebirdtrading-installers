@@ -1,0 +1,120 @@
+name: Linux AppImage and Snap
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch or commit of littlebirdtrading-app
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    env:
+      APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+    steps:
+      - name: Check out the private source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: none298-dotcom/littlebirdtrading-app
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - name: Check out this repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: ci
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb imagemagick desktop-file-utils appstream libfuse2
+          curl -sSL -o appimagetool "$APPIMAGETOOL_URL"
+          echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
+          chmod +x appimagetool
+      - name: Build the app folders (website and Snap Store builds)
+        id: build
+        run: |
+          set -euo pipefail
+          cd android
+          for d in direct store; do
+            ./gradlew --no-daemon :desktop:createDistributable -Pdistribution=$d
+            out=../build-$d/little-bird-trading; rm -rf "$out"; mkdir -p "$(dirname "$out")"
+            cp -a "desktop/build/compose/binaries/main/app/Little Bird Trading" "$out"
+            mv "$out/bin/Little Bird Trading" "$out/bin/little-bird-trading"
+            mv "$out/lib/app/Little Bird Trading.cfg" "$out/lib/app/little-bird-trading.cfg"
+            test -x "$out/bin/little-bird-trading"
+          done
+      - name: Check the desktop entry and the listing file
+        run: |
+          desktop-file-validate packaging/linux/com.littlebirdtrading.LittleBirdTrading.desktop
+          appstreamcli validate --no-net packaging/linux/com.littlebirdtrading.LittleBirdTrading.metainfo.xml || true
+      - name: Pack the AppImage
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          sh packaging/linux/appimage/build-appimage.sh build-direct/little-bird-trading dist "$PWD/appimagetool"
+          tar -C build-store -czf dist/little-bird-trading-store-linux-x86_64.tar.gz little-bird-trading
+          (cd dist && sha256sum * | tee SHA256SUMS)
+      - name: Run it on a virtual screen and photograph each screen
+        run: |
+          set -euo pipefail
+          python3 ci/mock/server.py ci/mock/markets.json & sleep 2
+          export HOME="$PWD/scratch-home" XDG_DATA_HOME="$PWD/scratch-home/.local/share"
+          mkdir -p "$XDG_DATA_HOME/little-bird-trading" shots
+          echo '{"welcomeDone":true,"favorites":["US","JP"]}' > "$XDG_DATA_HOME/little-bird-trading/settings.json"
+          chmod +x dist/Little_Bird_Trading-x86_64.AppImage
+          for tab in home markets alerts account; do
+            xvfb-run -a -s "-screen 0 1440x960x24" bash -c "
+              JAVA_TOOL_OPTIONS='-Dlbt.api=http://127.0.0.1:8787/api/app -Dlbt.tab=$tab' APPIMAGE_EXTRACT_AND_RUN=1 dist/Little_Bird_Trading-x86_64.AppImage &
+              pid=\$!
+              sleep 25
+              kill -0 \$pid || { echo 'the app quit on $tab'; exit 1; }
+              import -window root shots/$tab.png
+              kill \$pid"
+          done
+          ls -l shots
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: linux
+          path: |
+            dist/
+            shots/
+
+  snap:
+    needs: appimage
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out the private source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: none298-dotcom/littlebirdtrading-app
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: art
+      - name: Lay out the snap project
+        run: |
+          set -euo pipefail
+          mkdir -p snapbuild/snap/gui snapbuild/app
+          tar -xzf art/dist/little-bird-trading-store-linux-x86_64.tar.gz -C snapbuild/app --strip-components=1
+          cp packaging/linux/snap/snapcraft.yaml snapbuild/snap/snapcraft.yaml
+          cp packaging/linux/snap-launch.sh snapbuild/
+          cp android/desktop/icons/icon.png snapbuild/snap/gui/little-bird-trading.png
+          sed 's|^Icon=.*|Icon=${SNAP}/meta/gui/little-bird-trading.png|' packaging/linux/com.littlebirdtrading.LittleBirdTrading.desktop > snapbuild/com.littlebirdtrading.LittleBirdTrading.desktop
+      - uses: snapcore/action-build@v1
+        id: snapcraft
+        with:
+          path: snapbuild
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: snap
+          path: ${{ steps.snapcraft.outputs.snap }}
