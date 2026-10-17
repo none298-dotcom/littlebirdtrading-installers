@@ -34,7 +34,7 @@ jobs:
       - name: Tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb imagemagick desktop-file-utils appstream libfuse2
+          sudo apt-get install -y -qq xvfb xdotool imagemagick desktop-file-utils appstream libfuse2
           curl -sSL -o appimagetool "$APPIMAGETOOL_URL"
           echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
           chmod +x appimagetool
@@ -79,6 +79,19 @@ jobs:
               import -window root shots/$tab.png
               kill \$pid"
           done
+          # Ctrl+Alt+L opens the levels card (owner Oct 18); a second launch with --card hands off to the running app.
+          xvfb-run -a -s "-screen 0 1440x960x24" bash -c "
+            JAVA_TOOL_OPTIONS='-Dlbt.api=http://127.0.0.1:8787/api/app' APPIMAGE_EXTRACT_AND_RUN=1 dist/Little_Bird_Trading-x86_64.AppImage &
+            pid=\$!
+            sleep 25
+            kill -0 \$pid || { echo 'the app quit before the hot key'; exit 1; }
+            xdotool key ctrl+alt+l; sleep 8
+            import -window root shots/card-hotkey.png
+            xdotool key Escape; sleep 2
+            JAVA_TOOL_OPTIONS='-Dlbt.api=http://127.0.0.1:8787/api/app' APPIMAGE_EXTRACT_AND_RUN=1 timeout 60 dist/Little_Bird_Trading-x86_64.AppImage --card || { echo 'the --card hand-off did not finish'; exit 1; }
+            sleep 8
+            import -window root shots/card-handoff.png
+            kill \$pid"
           ls -l shots
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
