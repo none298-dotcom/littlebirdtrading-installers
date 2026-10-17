@@ -198,6 +198,12 @@ jobs:
             Write-Host "App Actions registration file:"; Get-ChildItem "$($pkg.InstallLocation)" -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { Write-Host $_.Name }
           }
           Get-ChildItem dist -Recurse -File | ForEach-Object { "{0} {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Tee-Object dist/SHA256SUMS.txt
+      - name: Screenshots only (small, for quick checks)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-shots
+          path: shots/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
