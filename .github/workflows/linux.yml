@@ -27,6 +27,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           path: ci
+      - name: Validate synthetic two-list fixture
+        run: python3 -m unittest discover -s ci/mock -p test_server.py
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -68,11 +70,12 @@ jobs:
           python3 ci/mock/server.py ci/mock/markets.json & sleep 2
           export HOME="$PWD/scratch-home" XDG_DATA_HOME="$PWD/scratch-home/.local/share"
           mkdir -p "$XDG_DATA_HOME/little-bird-trading" shots
-          echo '{"welcomeDone":true,"favorites":["US","JP"]}' > "$XDG_DATA_HOME/little-bird-trading/settings.json"
+          echo '{"welcomeDone":true,"favorites":["US","AT"]}' > "$XDG_DATA_HOME/little-bird-trading/settings.json"
           chmod +x dist/Little_Bird_Trading-x86_64.AppImage
-          for tab in home markets alerts account; do
+          for tab in home markets alerts account levels-US levels-AT; do
+            if [[ "$tab" == levels-* ]]; then scene="-Dlbt.market=${tab#levels-}"; else scene="-Dlbt.tab=$tab"; fi
             xvfb-run -a -s "-screen 0 1440x960x24" bash -c "
-              JAVA_TOOL_OPTIONS='-Dlbt.api=http://127.0.0.1:8787/api/app -Dlbt.tab=$tab' APPIMAGE_EXTRACT_AND_RUN=1 dist/Little_Bird_Trading-x86_64.AppImage &
+              JAVA_TOOL_OPTIONS='-Dlbt.api=http://127.0.0.1:8787/api/app -Dlbt.favorites=US,AT $scene' APPIMAGE_EXTRACT_AND_RUN=1 dist/Little_Bird_Trading-x86_64.AppImage &
               pid=\$!
               sleep 25
               kill -0 \$pid || { echo 'the app quit on $tab'; exit 1; }

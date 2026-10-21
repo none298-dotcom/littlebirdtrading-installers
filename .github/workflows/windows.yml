@@ -28,6 +28,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           path: ci
+      - name: Validate synthetic two-list fixture
+        run: python -m unittest discover -s ci/mock -p test_server.py
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -153,11 +155,12 @@ jobs:
           if (-not $exe) { throw "installed app not found" }
           Write-Host "installed at $($exe.FullName)"
           $data = "$env:APPDATA\Little Bird Trading"; New-Item -ItemType Directory -Force $data | Out-Null
-          '{"welcomeDone":true,"favorites":["US","JP"]}' | Out-File -Encoding ascii "$data\settings.json"
+          '{"welcomeDone":true,"favorites":["US","AT"]}' | Out-File -Encoding ascii "$data\settings.json"
           New-Item -ItemType Directory -Force shots | Out-Null
           Add-Type -AssemblyName System.Windows.Forms,System.Drawing
-          foreach ($tab in "home","markets","alerts","account") {
-            $env:JAVA_TOOL_OPTIONS = "-Dlbt.api=http://127.0.0.1:8787/api/app -Dlbt.tab=$tab"
+          foreach ($tab in "home","markets","alerts","account","levels-US","levels-AT") {
+            $scene = if ($tab.StartsWith("levels-")) { "-Dlbt.market=$($tab.Substring(7))" } else { "-Dlbt.tab=$tab" }
+            $env:JAVA_TOOL_OPTIONS = "-Dlbt.api=http://127.0.0.1:8787/api/app -Dlbt.favorites=US,AT $scene"
             $app = Start-Process $exe.FullName -PassThru
             Start-Sleep 25
             if ($app.HasExited) { throw "the app quit on $tab (exit $($app.ExitCode))" }

@@ -1,30 +1,81 @@
-import json, sys, re
+"""Loopback-only installer fixture. Synthetic data, no production calls or credentials."""
+import json
+import re
+import sys
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
-MARKETS=json.load(open(sys.argv[1]))
-def iso(d): return d.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-class H(BaseHTTPRequestHandler):
-    def send(self, o, code=200):
-        b=json.dumps(o).encode(); self.send_response(code); self.send_header("content-type","application/json"); self.end_headers(); self.wfile.write(b)
-    def do_GET(self):
-        now=datetime.now(timezone.utc); p=self.path
-        if p.endswith("/markets"): return self.send({"markets":MARKETS})
-        if p.endswith("/next"):
-            offs={"JP":2*3600+14*60,"KR":3*3600,"US":-3600,"AU":5*3600,"DE":-12*3600,"IN":4*3600}
-            return self.send({"now":iso(now),"markets":[{"market":m["code"],"slug":m["code"],"proAt":iso(now-timedelta(hours=3)),"freeAt":iso(now+timedelta(seconds=offs.get(m["code"],8*3600)))} for m in MARKETS]})
-        m=re.search(r"/levels/([A-Z]+)",p)
-        if m:
-            code=m.group(1); rep={"slug":"daily-report-2026-10-13","title":"t","date":"2026-10-13","freeAt":iso(now+(timedelta(hours=-1) if code=="US" else timedelta(hours=2,minutes=14))),"proAt":iso(now-timedelta(hours=3)),"url":"https://littlebirdtrading.com/trade-plans/daily-report-2026-10-13"}
-            if code!="US": return self.send({"market":code,"access":"locked","pro":False,"report":rep,"symbols":None})
-            def L(v,l,k): return {"value":v,"label":l,"kind":k,"timeframe":"day"}
-            sym={"SPY":{"signal":"tailwind","lines":[L(578.4,"R2","resistance"),L(574.1,"R1","resistance"),L(571.25,"Pivot","pivot"),L(568.6,"S1","support"),L(564.9,"S2","support")]},
-                 "ES":{"signal":"tailwind","lines":[L(5821.5,"R1","resistance"),L(5790.25,"Pivot","pivot"),L(5761,"S1","support")]},
-                 "QQQ":{"signal":"perch","lines":[L(498.2,"R1","resistance"),L(492.8,"S1","support")]},
-                 "NQ":{"signal":"headwind","lines":[L(20510,"R1","resistance"),L(20302.5,"S1","support")]}}
-            return self.send({"market":code,"access":"free","pro":False,"report":rep,"symbols":sym})
-        self.send({"error":"nope"},404)
-    def do_POST(self):
-        n=int(self.headers.get('content-length',0)); b=self.rfile.read(n).decode()
-        open('posts.log','a').write(self.path+' '+b+'\n'); self.send({"ok":True})
-    def log_message(self,*a): pass
-HTTPServer(("127.0.0.1",8787),H).serve_forever()
+from urllib.parse import urlsplit
+
+NOW = datetime.now(timezone.utc)
+
+
+def iso(value):
+    return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def payload(path, markets, now=NOW):
+    path = urlsplit(path).path
+    if path == "/api/app/markets":
+        return {"markets": markets}, 200
+    if path == "/api/app/next":
+        return {"now": iso(now), "markets": [
+            {"market": m["code"], "slug": "fixture-" + m["code"].lower(),
+             "proAt": iso(now - timedelta(hours=3)),
+             "freeAt": iso(now + timedelta(seconds=-3600 if m["code"] == "US" else 8040))}
+            for m in markets]}, 200
+    match = re.fullmatch(r"/api/app/levels/([A-Z]+)", path)
+    if match:
+        code = match.group(1)
+        market = next((m for m in markets if m["code"] == code), None)
+        if market is None:
+            return {"error": "Unknown fixture list"}, 404
+        report = {"slug": "fixture-" + code.lower(), "title": "Synthetic installer test",
+                  "date": now.date().isoformat(), "proAt": iso(now - timedelta(hours=3)),
+                  "freeAt": iso(now + timedelta(seconds=-3600 if code == "US" else 8040)),
+                  "url": "http://127.0.0.1:8787/fixture/" + code.lower()}
+        result = {"market": code, "access": "free" if code == "US" else "locked",
+                  "pro": False, "report": report}
+        if code == "US":
+            result["symbols"] = {
+                symbol.upper(): {"signal": "perch", "lines": [
+                    {"value": base + delta, "label": label, "kind": kind, "timeframe": "day"}
+                    for delta, label, kind in ((10, "R1", "resistance"), (0, "Pivot", "pivot"), (-10, "S1", "support"))]}
+                for symbol, base in zip(market["symbols"], (570, 5800, 490, 20300))}
+        return result, 200
+    if path == "/api/app/me":
+        return {"error": "Synthetic fixture is signed out"}, 401
+    if path == "/api/app/sync":
+        return {"error": "Sync requires Pro"}, 403
+    return {"error": "Unknown fixture route"}, 404
+
+
+def handler(markets):
+    class Handler(BaseHTTPRequestHandler):
+        def send(self, body, code=200):
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            body, code = payload(self.path, markets)
+            self.send(body, code)
+
+        def do_POST(self):
+            # Consume synthetic registrations without saving payloads or sending anything.
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            self.send({"ok": True})
+
+        def log_message(self, *args):
+            pass
+    return Handler
+
+
+if __name__ == "__main__":
+    with open(sys.argv[1], encoding="utf-8") as source:
+        markets = json.load(source)
+    if [m["code"] for m in markets] != ["US", "AT"]:
+        raise ValueError("Installer fixture must contain US and AT only")
+    HTTPServer(("127.0.0.1", 8787), handler(markets)).serve_forever()
