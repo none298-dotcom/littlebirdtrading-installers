@@ -6,6 +6,10 @@ on:
       source_ref:
         description: Branch or commit of littlebirdtrading-app
         default: main
+      store_images:
+        description: Capture native Windows store images only (no installer publication)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,6 +17,7 @@ permissions:
 
 jobs:
   windows:
+    if: ${{ inputs.store_images != true }}
     runs-on: windows-latest
     env:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -217,3 +222,58 @@ jobs:
             install.log
             identity.log
             identity-result.txt
+  store-images:
+    if: ${{ inputs.store_images == true }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Check out private capture source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: none298-dotcom/littlebirdtrading-app
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Capture dependencies
+        run: python -m pip install Pillow pywin32
+      - name: Build actual Windows store executable
+        shell: bash
+        working-directory: android
+        run: ./gradlew --no-daemon :desktop:createDistributable -Pdistribution=store
+      - name: Capture English Windows UI first
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem android/desktop/build/compose/binaries/main/app -Recurse -Filter "Little Bird Trading.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Packaged Windows executable missing" }
+          python tools/store-shots/capture_windows.py --exe $exe.FullName --out windows-store-shots --languages en
+          if ($LASTEXITCODE -ne 0) { throw "English native capture failed" }
+      - name: English captures for early visual review
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-store-english
+          path: |
+            windows-store-shots/en/*.png
+            windows-store-shots/manifest.json
+      - name: Capture fourteen localized Windows sets
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem android/desktop/build/compose/binaries/main/app -Recurse -Filter "Little Bird Trading.exe" | Select-Object -First 1
+          python tools/store-shots/capture_windows.py --exe $exe.FullName --out windows-store-localized --languages de es es-MX fr hi it ja ko nl pt-BR pt-PT sv zh-Hans zh-Hant
+          if ($LASTEXITCODE -ne 0) { throw "Localized native capture failed" }
+      - name: Upload image evidence only, never application source
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-store-images
+          path: |
+            windows-store-shots/**/*.png
+            windows-store-shots/manifest.json
+            windows-store-shots/**/runtime.log
+            windows-store-localized/**/*.png
+            windows-store-localized/manifest.json
+            windows-store-localized/**/runtime.log
