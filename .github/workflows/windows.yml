@@ -240,7 +240,7 @@ jobs:
           distribution: temurin
           java-version: "17"
       - name: Capture dependencies
-        run: python -m pip install Pillow pywin32
+        run: python -m pip install Pillow pywin32 psutil
       - name: Build actual Windows store executable
         shell: bash
         working-directory: android
