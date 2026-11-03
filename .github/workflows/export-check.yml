@@ -72,6 +72,8 @@ jobs:
           path: snapbuild
       - name: Install the snap
         run: sudo snap install --dangerous "${{ steps.snapcraft.outputs.snap }}"
+      - name: Show what the snap may access
+        run: snap connections little-bird-trading || true
       - name: Check 2, the strictly confined snap
         id: snapcheck
         continue-on-error: true
