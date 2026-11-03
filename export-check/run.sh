@@ -13,6 +13,7 @@ xvfb-run -a -s "-screen 0 1440x960x24" bash -c "
   pid=\$!
   sleep 40
   import -window root shots/$label-1-save-window.png
+  xdotool mousemove 600 26 click 1; sleep 1
   xdotool key ctrl+a; sleep 1
   xdotool type --delay 60 '$out/test.pine'; sleep 1
   xdotool key Return; sleep 10
