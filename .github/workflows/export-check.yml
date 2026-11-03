@@ -1,0 +1,87 @@
+name: Export check (Linux app and Snap)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch or commit of littlebirdtrading-app
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  linux-export:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out the private source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: none298-dotcom/littlebirdtrading-app
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - name: Check out this repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: ci
+      - name: Validate the synthetic fixture and its export files
+        run: python3 -m unittest discover -s ci/mock -p test_server.py
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb xdotool imagemagick
+      - name: Build the Snap Store app folder
+        run: |
+          set -euo pipefail
+          cd android
+          ./gradlew --no-daemon :desktop:createDistributable -Pdistribution=store
+          out=../build-store/little-bird-trading; rm -rf "$out"; mkdir -p "$(dirname "$out")"
+          cp -a "desktop/build/compose/binaries/main/app/Little Bird Trading" "$out"
+          mv "$out/bin/Little Bird Trading" "$out/bin/little-bird-trading"
+          mv "$out/lib/app/Little Bird Trading.cfg" "$out/lib/app/little-bird-trading.cfg"
+          test -x "$out/bin/little-bird-trading"
+      - name: Settings for the app (skip the welcome screen)
+        run: |
+          set -euo pipefail
+          for base in "$HOME/.local/share" "$HOME/snap/little-bird-trading/current/.local/share" "$HOME/snap/little-bird-trading/common/.local/share"; do
+            mkdir -p "$base/little-bird-trading"
+            echo '{"welcomeDone":true,"favorites":["US","AT"]}' > "$base/little-bird-trading/settings.json"
+          done
+      - name: Check 1, the plain app folder (baseline, no confinement)
+        id: baseline
+        continue-on-error: true
+        run: ci/export-check/run.sh "$PWD/build-store/little-bird-trading/bin/little-bird-trading" baseline "$HOME/lbt-export-test/baseline"
+      - name: Lay out the snap project
+        run: |
+          set -euo pipefail
+          mkdir -p snapbuild/snap/gui snapbuild/app
+          cp -a build-store/little-bird-trading/. snapbuild/app/
+          cp packaging/linux/snap/snapcraft.yaml snapbuild/snap/snapcraft.yaml
+          cp packaging/linux/snap-launch.sh snapbuild/
+          cp android/desktop/icons/icon.png snapbuild/snap/gui/little-bird-trading.png
+          sed 's|^Icon=.*|Icon=${SNAP}/meta/gui/little-bird-trading.png|' packaging/linux/com.littlebirdtrading.LittleBirdTrading.desktop > snapbuild/com.littlebirdtrading.LittleBirdTrading.desktop
+      - uses: snapcore/action-build@v1
+        id: snapcraft
+        with:
+          path: snapbuild
+      - name: Install the snap
+        run: sudo snap install --dangerous "${{ steps.snapcraft.outputs.snap }}"
+      - name: Check 2, the strictly confined snap
+        id: snapcheck
+        continue-on-error: true
+        run: ci/export-check/run.sh "snap run little-bird-trading" snap "$HOME/lbt-export-test/snap"
+      - name: Photographs of both checks
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: export-check-shots
+          path: shots/
+      - name: Result
+        run: |
+          echo "baseline: ${{ steps.baseline.outcome }}   snap: ${{ steps.snapcheck.outcome }}"
+          test "${{ steps.baseline.outcome }}" = success
+          test "${{ steps.snapcheck.outcome }}" = success
