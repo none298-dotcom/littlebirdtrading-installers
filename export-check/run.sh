@@ -9,6 +9,7 @@ python3 ci/mock/server.py ci/mock/markets.json & srv=$!
 sleep 2
 rm -f "$out/test.pine"
 xvfb-run -a -s "-screen 0 1440x960x24" bash -c "
+  openbox & sleep 3
   JAVA_TOOL_OPTIONS='-Dlbt.api=http://127.0.0.1:8787/api/app -Dlbt.favorites=US,AT -Dlbt.market=US -Dlbt.autoExport=pine' $cmd &
   pid=\$!
   sleep 40
