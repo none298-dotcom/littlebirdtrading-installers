@@ -89,3 +89,41 @@ jobs:
           echo "baseline: ${{ steps.baseline.outcome }}   snap: ${{ steps.snapcheck.outcome }}"
           test "${{ steps.baseline.outcome }}" = success
           test "${{ steps.snapcheck.outcome }}" = success
+
+  windows-export:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the private source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: none298-dotcom/littlebirdtrading-app
+          ref: ${{ inputs.source_ref || 'codex/export-check' }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+      - name: Check out this repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: ci
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build the Microsoft Store app folder (no signing)
+        working-directory: android
+        shell: bash
+        run: ./gradlew --no-daemon :desktop:createDistributable -Pdistribution=store
+      - name: Windows check, the packaged app saves the Pine file
+        id: win
+        continue-on-error: true
+        shell: pwsh
+        run: ci/export-check/run.ps1 -Exe "$PWD\android\desktop\build\compose\binaries\main\app\Little Bird Trading\Little Bird Trading.exe" -Out "$env:USERPROFILE\lbt-export-test\windows"
+      - name: Photographs of the Windows check
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: export-check-windows-shots
+          path: shots/
+      - name: Result
+        shell: bash
+        run: |
+          echo "windows: ${{ steps.win.outcome }}"
+          test "${{ steps.win.outcome }}" = success
