@@ -6,6 +6,8 @@ on:
       source_ref:
         description: Branch or commit of littlebirdtrading-app
         default: main
+  push:
+    branches: [codex/export-check]
 
 permissions:
   contents: read
@@ -18,7 +20,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: none298-dotcom/littlebirdtrading-app
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ inputs.source_ref || 'codex/export-check' }}
           ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
       - name: Check out this repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
